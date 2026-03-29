@@ -208,7 +208,13 @@ export const useAppStore = create<AppState>()(
     setPageCount: (docId, count) =>
       set((state) => {
         const doc = state.openDocuments.find((d) => d.id === docId);
-        if (doc) doc.pageCount = count;
+        if (doc) {
+          doc.pageCount = count;
+          // IMPORTANT: If pageOrder was empty (initial PDF state), populate it now
+          if (doc.pageOrder.length === 0 && count > 0) {
+            doc.pageOrder = Array.from({ length: count }, (_, i) => i + 1);
+          }
+        }
       }),
 
     setThumbnailsReady: (docId, ready) =>
