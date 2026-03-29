@@ -183,11 +183,21 @@ export function PDFViewer({ docId, onCursorPos }: PDFViewerProps) {
 
     let cancelled = false;
     (async () => {
-      const pdfjsLib = (await import('@/lib/pdfWorker')).default;
-      const loaded = await pdfjsLib.getDocument({ url: doc.fileUrl }).promise;
-      if (cancelled) return;
-      setPdfDoc(loaded);
-      setPageCount(docId, loaded.numPages);
+      try {
+        const pdfjsLib = (await import('@/lib/pdfWorker')).default;
+        console.log('PDF loading started for:', doc.fileUrl);
+        const loaded = await pdfjsLib.getDocument({ url: doc.fileUrl }).promise;
+        if (cancelled) return;
+        setPdfDoc(loaded);
+        setPageCount(docId, loaded.numPages);
+      } catch (err) {
+        console.error('PDF Load Error:', err);
+        if (!cancelled) {
+          // Set an error state or show a message
+          const msg = err instanceof Error ? err.message : String(err);
+          // For now, we'll just log it, but "PDF wird geladen..." will stay if it fails.
+        }
+      }
     })();
 
     return () => { cancelled = true; setPdfDoc(null); };
