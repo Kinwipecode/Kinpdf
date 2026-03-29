@@ -6,7 +6,7 @@ import type {
   Annotation, Point, ToolType,
   HighlightAnnotation, FreehandAnnotation,
   CalloutAnnotation, TextAnnotation,
-  MeasureDistanceAnnotation, MeasureAreaAnnotation
+  MeasureDistanceAnnotation, MeasureAreaAnnotation, MeasureCircleAnnotation
 } from '@/types';
 import { MdChatBubbleOutline, MdMinimize, MdRefresh, MdDelete, MdContentCopy } from 'react-icons/md';
 import { ColorPicker } from '@/components/ColorPicker';
@@ -65,6 +65,7 @@ export function AnnotationCanvas({
   const selectionRect = useRef<{ start: Point; end: Point } | null>(null);
   const lassoPoints = useRef<Point[]>([]);
   const [contextMenu, setContextMenu] = useState<{ annId: string; x: number; y: number } | null>(null);
+  const { setHoveredPoint } = useAppStore();
   const [, setTick] = useState(0);
 
   const rerender = useCallback(() => setTick((t) => t + 1), []);
@@ -166,21 +167,15 @@ export function AnnotationCanvas({
         }
       }
 
-      if (e.key === '-' || e.key === '_') {
+      if (e.key === 'Delete' || e.key === 'Backspace' || e.key === '-' || e.key === '_') {
+        // Point deletion is now handled globally in useKeyboardShortcuts.ts
+        // But we still handle "undo" during ACTIVE drawing here
         if (drawing.current && (activeTool === 'measure-distance' || activeTool === 'measure-area')) {
           if ((drawing.current.points?.length || 0) > 2) {
             drawing.current.points!.splice(-2, 1);
             rerender();
+            return;
           }
-        }
-      }
-
-      if (e.key === 'Delete' || e.key === 'Backspace') {
-        const hasSelected = annotations.some(a => a.selected);
-        if (hasSelected) {
-          e.preventDefault();
-          deleteSelectedAnnotation(docId);
-          rerender();
         }
       }
       if (e.key === 'Escape') {
@@ -455,6 +450,11 @@ export function AnnotationCanvas({
                     selectAnnotation(docId, page, id);
                   }
                 }}
+                onContextMenu={(e) => {
+                  e.preventDefault(); e.stopPropagation();
+                  selectAnnotation(docId, page, id);
+                  setContextMenu({ annId: id, x: e.clientX, y: e.clientY });
+                }}
               />
 
               {/* Clickable segments for point insertion - ONLY when selected */}
@@ -500,6 +500,9 @@ export function AnnotationCanvas({
                 <circle key={i} cx={p.x} cy={p.y} r={selected ? 6 : 4} fill={selected ? '#fff' : color}
                   stroke={selected ? '#4f8ef7' : 'none'} strokeWidth={selected ? 2 : 0}
                   style={{ cursor: selected ? 'move' : 'pointer' }}
+                  onPointerEnter={() => selected && setHoveredPoint({ docId, page, annId: id, index: i })}
+                  onPointerLeave={() => setHoveredPoint(null)}
+                  onMouseDown={(e: any) => e.stopPropagation()}
                   onPointerDown={(e: any) => {
                     e.stopPropagation();
                     if (e.altKey) {
@@ -580,12 +583,21 @@ export function AnnotationCanvas({
               })}
 
               <polygon points={pstr} fill={ann.fillColor || color} fillOpacity={ann.fillColor ? 0.6 : 0.15}
+                data-ann-id={id}
+                onContextMenu={(e) => {
+                  e.preventDefault(); e.stopPropagation();
+                  selectAnnotation(docId, page, id);
+                  setContextMenu({ annId: id, x: e.clientX, y: e.clientY });
+                }}
                 stroke={selected ? '#4f8ef7' : color} strokeWidth={selected ? 3 : 2} pointerEvents="none" />
 
               {points.map((p, i) => (
                 <circle key={i} cx={p.x * pdfScale} cy={p.y * pdfScale} r={selected ? 5 : 3} fill={selected ? '#fff' : color}
                   stroke={selected ? '#4f8ef7' : 'none'} strokeWidth={selected ? 2 : 0}
                   style={{ cursor: selected ? 'move' : 'pointer' }}
+                  onPointerEnter={() => selected && setHoveredPoint({ docId, page, annId: id, index: i })}
+                  onPointerLeave={() => setHoveredPoint(null)}
+                  onMouseDown={(e: any) => e.stopPropagation()}
                   onPointerDown={(e: any) => {
                     e.stopPropagation();
                     if (e.altKey) {
@@ -600,7 +612,7 @@ export function AnnotationCanvas({
                     }
                     selectAnnotation(docId, page, id);
                     const svg = svgRef.current;
-                    if (svg && (activeTool === 'cursor' || activeTool === 'direct-edit')) {
+                    if (svg && (activeTool === 'cursor' || activeTool === 'direct-edit' || activeTool === 'hand')) {
                       (svg as SVGSVGElement).setPointerCapture(e.pointerId);
                       dragRef.current = { id, type: 'area-point', pointIndex: i };
                     }
@@ -608,6 +620,34 @@ export function AnnotationCanvas({
                 />
               ))}
               <text x={points.reduce((s, p) => s + p.x, 0) / points.length * pdfScale} y={points.reduce((s, p) => s + p.y, 0) / points.length * pdfScale} textAnchor="middle" className="measure-label" style={{ pointerEvents: 'none' }}>
+                {displayValue} {unit}²
+              </text>
+            </g>
+          );
+        }
+
+        case 'measure-circle': {
+          const { center, radius, displayValue, unit, color, id, selected } = ann as MeasureCircleAnnotation;
+          const cx = center.x * pdfScale;
+          const cy = center.y * pdfScale;
+          const r = radius * pdfScale;
+          return (
+            <g key={id}>
+              <circle cx={cx} cy={cy} r={r} fill={ann.fillColor || color} fillOpacity={ann.fillColor ? 0.6 : 0.1}
+                stroke={selected ? '#4f8ef7' : color} strokeWidth={selected ? 3 : 2}
+                style={{ cursor: activeTool === 'hand' ? 'grab' : 'pointer' }}
+                onPointerDown={(e) => {
+                  if (activeTool === 'eraser') { e.stopPropagation(); deleteAnnotation(docId, page, id); }
+                  else if (activeTool === 'fill-tool') { e.stopPropagation(); updateAnnotation(docId, page, { ...ann, fillColor: activeFillColor } as any); }
+                  else if (['cursor', 'direct-edit', 'hand'].includes(activeTool as string)) { e.stopPropagation(); selectAnnotation(docId, page, id); }
+                }}
+                onContextMenu={(e) => {
+                  e.preventDefault(); e.stopPropagation();
+                  selectAnnotation(docId, page, id);
+                  setContextMenu({ annId: id, x: e.clientX, y: e.clientY });
+                }}
+              />
+              <text x={cx} y={cy} textAnchor="middle" className="measure-label" style={{ pointerEvents: 'none' }}>
                 {displayValue} {unit}²
               </text>
             </g>
@@ -1121,6 +1161,23 @@ export function AnnotationCanvas({
         </g>
       );
     }
+    if (d.type === 'measure-circle' && s && e) {
+      const dVal = dist(s, e);
+      const radius = dVal / 2;
+      const center = { x: (s.x + e.x) / 2, y: (s.y + e.y) / 2 };
+      const scale = doc?.scale ?? { pixelsPerUnit: 1, unit: 'px' };
+      const realRadius = (radius / pdfScale) / scale.pixelsPerUnit;
+      const realArea = Math.PI * (realRadius ** 2);
+      return (
+        <g>
+          <circle cx={center.x} cy={center.y} r={radius} fill="rgba(26, 115, 232, 0.1)" stroke="#1a73e8" strokeWidth={2} strokeDasharray="5 3" />
+          <line x1={s.x} y1={s.y} x2={e.x} y2={e.y} stroke="#1a73e8" strokeWidth={1} strokeDasharray="2 2" />
+          <text x={center.x} y={center.y - radius - 10} textAnchor="middle" className="measure-label">
+            {realArea.toFixed(2)} {scale.unit}²
+          </text>
+        </g>
+      );
+    }
     if (d.type === 'measure-area' && p.length > 0) {
       const pstr = p.map((pt) => `${pt.x},${pt.y}`).join(' ');
       return (
@@ -1168,7 +1225,7 @@ export function AnnotationCanvas({
   // ─── Pointer event handling ───
   const isAnnotateTool = [
     'highlight', 'freehand', 'callout', 'text',
-    'measure-distance', 'measure-area', 'measure-calibrate',
+    'measure-distance', 'measure-area', 'measure-circle', 'measure-calibrate',
     'direct-edit', 'ocr-select',
     'rect-shape', 'circle-shape', 'line-shape', 'arrow-shape', 'double-arrow-shape',
     'arrow-dashed', 'arrow-filled', 'arrow-measurement',
@@ -1257,11 +1314,11 @@ export function AnnotationCanvas({
       return;
     }
 
-    if (activeTool === 'measure-distance' || activeTool === 'measure-area') {
+    if (activeTool === 'measure-distance' || activeTool === 'measure-area' || activeTool === 'measure-circle') {
       if (!drawing.current) {
         (svg as SVGSVGElement).setPointerCapture(e.pointerId);
-        drawing.current = { id: uuidv4(), type: activeTool, points: [normPt, normPt] };
-      } else {
+        drawing.current = { id: uuidv4(), type: activeTool, points: [normPt, normPt], start: normPt, end: normPt };
+      } else if (activeTool !== 'measure-circle') {
         const pts = drawing.current.points!;
         pts[pts.length - 1] = normPt; // Finalize current preview
         pts.push(normPt); // Add new potential point
@@ -1484,9 +1541,21 @@ export function AnnotationCanvas({
         text: '',
         fontSize: 13,
       } as TextAnnotation);
-    } else if (activeTool === 'measure-distance') {
-      // Handled by onPointerDown and finishDistanceMeasurement
-      (svgRef.current as SVGSVGElement).releasePointerCapture(e.pointerId);
+    } else if (activeTool === 'measure-circle') {
+      const dVal = dist(d.start, d.end);
+      const radius = dVal / 2;
+      const scale = doc?.scale ?? { pixelsPerUnit: 1, unit: 'px' };
+      const realRadius = radius / scale.pixelsPerUnit;
+      const realArea = Math.PI * (realRadius ** 2);
+      addAnnotation(docId, page, {
+        id: d.id, type: 'measure-circle', page, color: '#1a73e8', opacity: 1,
+        createdAt: Date.now(), center: { x: (d.start.x + d.end.x) / 2, y: (d.start.y + d.end.y) / 2 },
+        radius: radius, displayValue: realArea.toFixed(2), unit: scale.unit,
+      } as MeasureCircleAnnotation);
+    } else if (activeTool === 'measure-distance' || activeTool === 'measure-area') {
+      // These are multi-click tools. Do NOT nullify drawing.current here.
+      // They are finished via DoubleClick or Enter.
+      (svgRef.current as SVGSVGElement)?.releasePointerCapture(e.pointerId);
       return;
     } else if (activeTool === 'measure-calibrate') {
       onCalibrate?.(d.start, d.end);
@@ -1732,9 +1801,35 @@ export function AnnotationCanvas({
                     alignItems: 'center',
                     justifyContent: 'space-between'
                   }}>
-                  <span>Pfeil-Eigenschaften</span>
-                  <span style={{ fontSize: '10px', color: '#666', fontWeight: 'normal' }}>Zum Verschieben ziehen</span>
+                  <span>{currentAnn.type.includes('measure') ? 'Messung' : 'Eigenschaften'}</span>
+                  <span style={{ fontSize: '10px', color: '#666', fontWeight: 'normal' }}>Ziehen zum Verschieben</span>
                 </div>
+
+                {currentAnn.type.includes('measure') && (
+                  <div style={rowStyle}>
+                    <span>Modus:</span>
+                    <div style={{ display: 'flex', gap: '8px' }}>
+                      <button
+                        onClick={() => updateAnnotation(docId, page, { ...currentAnn, isNegative: false })}
+                        style={{
+                          padding: '4px 10px', borderRadius: '4px', border: 'none',
+                          background: currentAnn.isNegative ? '#333' : '#34a853',
+                          color: '#fff', cursor: 'pointer', fontWeight: 'bold'
+                        }}>
+                        + ADD
+                      </button>
+                      <button
+                        onClick={() => updateAnnotation(docId, page, { ...currentAnn, isNegative: true })}
+                        style={{
+                          padding: '4px 10px', borderRadius: '4px', border: 'none',
+                          background: currentAnn.isNegative ? '#ea4335' : '#333',
+                          color: '#fff', cursor: 'pointer', fontWeight: 'bold'
+                        }}>
+                        - SUB
+                      </button>
+                    </div>
+                  </div>
+                )}
 
                 <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', userSelect: 'none' }}>
                   <input type="checkbox" checked={!!currentAnn.doubleSided} onChange={(e) => {

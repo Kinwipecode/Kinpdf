@@ -441,7 +441,8 @@ export function Ribbon({ onOpenFile, activeDocId }: RibbonProps) {
           <>
             <RibbonGroup label="Messen">
               <ToolBtn icon={<MdTimeline />} label="Abstand" tool="measure-distance" tooltip="Abstand messen" />
-              <ToolBtn icon={<BsVectorPen />} label="Fläche" tool="measure-area" tooltip="Fläche messen" />
+              <ToolBtn icon={<MdOutlineSquare />} label="Fläche" tool="measure-area" tooltip="Fläche messen" />
+              <ToolBtn icon={<MdOutlineCircle />} label="Kreis-Fläche" tool="measure-circle" tooltip="Kreisfläche messen (über Diagonale)" />
             </RibbonGroup>
             <RibbonGroup label="Kalibrieren">
               <ToolBtn icon={<TbRulerMeasure />} label="Kalibrieren" tool="measure-calibrate" tooltip="Maßstab festlegen" />

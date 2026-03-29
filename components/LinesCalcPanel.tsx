@@ -76,7 +76,7 @@ function LinesCalcPanelInternal() {
         const paddedCalcs = [...calcList];
         while (paddedCalcs.length < distCalculatorColCount) paddedCalcs.push('');
 
-        const finalResult = parseAndEval(base, paddedCalcs.slice(0, distCalculatorColCount));
+        const finalResult = parseAndEval(base, paddedCalcs.slice(0, distCalculatorColCount)) * (ann.isNegative ? -1 : 1);
         return { ann, base, paddedCalcs, finalResult };
     });
 
@@ -190,6 +190,7 @@ function LinesCalcPanelInternal() {
                     <thead>
                         <tr style={{ color: '#9aa0ac', borderBottom: '1px solid #3d3e47', textAlign: 'left' }}>
                             <th style={{ padding: '8px 4px', fontWeight: 500, width: '30px' }}></th>
+                            <th style={{ padding: '8px 4px', fontWeight: 500, width: '40px' }}>Mode</th>
                             <th style={{ padding: '8px 4px', fontWeight: 500, whiteSpace: 'nowrap' }}>Seite</th>
                             <th style={{ padding: '8px 4px', fontWeight: 500, whiteSpace: 'nowrap' }}>Länge ({activeDoc.scale.unit})</th>
                             {Array.from({ length: distCalculatorColCount }).map((_, i) => (
@@ -213,6 +214,24 @@ function LinesCalcPanelInternal() {
                             >
                                 <td style={{ padding: '8px 4px', textAlign: 'center' }}>
                                     <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: ann.color, margin: '0 auto' }} />
+                                </td>
+                                <td style={{ padding: '8px 4px', textAlign: 'center' }} onClick={(e) => e.stopPropagation()}>
+                                    <button
+                                        onClick={() => updateAnnotation(activeDoc.id, ann.page, { ...ann, isNegative: !ann.isNegative } as any)}
+                                        style={{
+                                            padding: '2px 6px',
+                                            borderRadius: '4px',
+                                            background: ann.isNegative ? '#ea4335' : '#34a853',
+                                            color: '#fff',
+                                            border: 'none',
+                                            fontSize: '10px',
+                                            fontWeight: 'bold',
+                                            cursor: 'pointer',
+                                            minWidth: '24px'
+                                        }}
+                                    >
+                                        {ann.isNegative ? '-' : '+'}
+                                    </button>
                                 </td>
                                 <td style={{ padding: '8px 4px', color: '#5f6368' }}>S. {ann.page + 1}</td>
                                 <td style={{ padding: '8px 4px', fontWeight: 'bold' }}>{base.toLocaleString('de-CH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
@@ -253,7 +272,7 @@ function LinesCalcPanelInternal() {
                     </tbody>
                     <tfoot>
                         <tr style={{ borderTop: '2px solid #4f8ef7' }}>
-                            <td colSpan={distCalculatorColCount + 3} style={{ padding: '16px 4px', fontWeight: 'bold', fontSize: '14px' }}>GESAMTSUMME</td>
+                            <td colSpan={distCalculatorColCount + 4} style={{ padding: '16px 4px', fontWeight: 'bold', fontSize: '14px' }}>GESAMTSUMME</td>
                             <td style={{ padding: '16px 4px', textAlign: 'right', fontWeight: 'bold', fontSize: '14px', color: '#4f8ef7' }}>
                                 {totalSum.toLocaleString('de-CH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                             </td>

@@ -11,6 +11,7 @@ export type ToolType =
   | 'callout'
   | 'measure-distance'
   | 'measure-area'
+  | 'measure-circle'
   | 'measure-calibrate'
   | 'direct-edit'
   | 'ocr-select'
@@ -38,6 +39,7 @@ export type AnnotationType =
   | 'text'
   | 'measure-distance'
   | 'measure-area'
+  | 'measure-circle'
   | 'rect-shape'
   | 'circle-shape'
   | 'line-shape'
@@ -110,6 +112,7 @@ export interface MeasureDistanceAnnotation extends BaseAnnotation {
   displayValue: string;
   unit: string;
   calculations?: string[]; // Array of operations like ["x2", "+20"]
+  isNegative?: boolean;
 }
 
 export interface MeasureAreaAnnotation extends BaseAnnotation {
@@ -118,6 +121,17 @@ export interface MeasureAreaAnnotation extends BaseAnnotation {
   displayValue: string;
   unit: string;
   calculations?: string[]; // Array of operations like ["*2", "+20"]
+  isNegative?: boolean;
+}
+
+export interface MeasureCircleAnnotation extends BaseAnnotation {
+  type: 'measure-circle';
+  center: Point;
+  radius: number;
+  displayValue: string;
+  unit: string;
+  calculations?: string[];
+  isNegative?: boolean;
 }
 
 export interface ShapeAnnotation extends BaseAnnotation {
@@ -153,6 +167,7 @@ export type Annotation =
   | TextAnnotation
   | MeasureDistanceAnnotation
   | MeasureAreaAnnotation
+  | MeasureCircleAnnotation
   | ShapeAnnotation;
 
 // ──────────────────────────────────────────────

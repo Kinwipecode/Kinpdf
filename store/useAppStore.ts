@@ -14,6 +14,8 @@ import type {
 interface AppState {
   openDocuments: OpenDocument[];
   activeDocumentId: string | null;
+  hoveredPoint: { docId: string; page: number; annId: string; index: number } | null;
+  setHoveredPoint: (p: { docId: string; page: number; annId: string; index: number } | null) => void;
   activeTool: ToolType;
   activeColor: string;
   activeFillColor: string;
@@ -80,6 +82,8 @@ export const useAppStore = create<AppState>()(
   immer((set, get) => ({
     openDocuments: [],
     activeDocumentId: null,
+    hoveredPoint: null,
+    setHoveredPoint: (p) => set((state) => { state.hoveredPoint = p; }),
     activeTool: 'hand',
     activeColor: '#000000',
     activeFillColor: 'transparent',
