@@ -138,7 +138,7 @@ const DropdownToolBtn = ({
   );
 };
 
-function RibbonGroup({ label, children }: { label: string; children: React.ReactNode }) {
+function RibbonGroup({ label, children }: { label: React.ReactNode; children: React.ReactNode }) {
   return (
     <div className="ribbon-group">
       <div className="ribbon-group-buttons">{children}</div>
@@ -444,7 +444,11 @@ export function Ribbon({ onOpenFile, activeDocId }: RibbonProps) {
               <ToolBtn icon={<MdOutlineSquare />} label="Fläche" tool="measure-area" tooltip="Fläche messen" />
               <ToolBtn icon={<MdOutlineCircle />} label="Kreis-Fläche" tool="measure-circle" tooltip="Kreisfläche messen (über Diagonale)" />
             </RibbonGroup>
-            <RibbonGroup label="Kalibrieren">
+            <RibbonGroup label={
+              <span style={{ fontFamily: 'monospace', letterSpacing: '-0.5px' }}>
+                {doc && doc.scale.unit !== 'px' ? `1px = ${(1 / doc.scale.pixelsPerUnit).toPrecision(3)} ${doc.scale.unit}` : 'MAßSTAB'}
+              </span>
+            }>
               <ToolBtn icon={<TbRulerMeasure />} label="Kalibrieren" tool="measure-calibrate" tooltip="Maßstab festlegen" />
             </RibbonGroup>
             <RibbonGroup label="Lupe">
@@ -467,14 +471,6 @@ export function Ribbon({ onOpenFile, activeDocId }: RibbonProps) {
                     outline: 'none'
                   }}
                 />
-              </div>
-            </RibbonGroup>
-            <RibbonGroup label="Maßstab">
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 2, padding: '0 4px' }}>
-                <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>Aktueller Maßstab:</span>
-                <span style={{ fontSize: 12, color: 'var(--text-primary)', fontFamily: 'monospace' }}>
-                  {doc ? `1px = ${(1 / doc.scale.pixelsPerUnit).toPrecision(3)} ${doc.scale.unit}` : '—'}
-                </span>
               </div>
             </RibbonGroup>
             <RibbonGroup label="Auswertung">

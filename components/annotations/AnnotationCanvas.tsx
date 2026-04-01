@@ -257,8 +257,10 @@ export function AnnotationCanvas({
       rerender();
     };
     window.addEventListener('abort-annotation', handleAbort);
+    drawing.current = null; // Clean up when tool changes
+    rerender();
     return () => window.removeEventListener('abort-annotation', handleAbort);
-  }, [rerender]);
+  }, [activeTool, rerender]);
 
   const getAnnotationBounds = (ann: Annotation): { x: number; y: number; w: number; h: number } | null => {
     const a = ann as any;
@@ -1300,20 +1302,6 @@ export function AnnotationCanvas({
       return;
     }
 
-    if (activeTool === 'measure-calibrate') {
-      if (!drawing.current) {
-        (svg as SVGSVGElement).setPointerCapture(e.pointerId);
-        drawing.current = { id: uuidv4(), type: 'measure-calibrate', start: normPt, end: normPt, points: [normPt, normPt] };
-      } else {
-        const start = drawing.current.start!;
-        onCalibrate?.(start, normPt);
-        drawing.current = null;
-        setActiveTool('hand');
-      }
-      rerender();
-      return;
-    }
-
     if (activeTool === 'measure-distance' || activeTool === 'measure-area' || activeTool === 'measure-circle') {
       if (!drawing.current) {
         (svg as SVGSVGElement).setPointerCapture(e.pointerId);
@@ -1391,12 +1379,9 @@ export function AnnotationCanvas({
       return;
     }
 
-    if (drawing.current && (activeTool === 'measure-distance' || activeTool === 'measure-area' || activeTool === 'measure-calibrate')) {
+    if (drawing.current && (activeTool === 'measure-distance' || activeTool === 'measure-area')) {
       const pts = drawing.current.points!;
       pts[pts.length - 1] = normPt;
-      if (activeTool === 'measure-calibrate') {
-        drawing.current.end = normPt;
-      }
       rerender();
       return;
     }
@@ -1715,8 +1700,22 @@ export function AnnotationCanvas({
                     }
                   }
                 }}
-                style={{ width: width * magZoom, height: height * magZoom, imageRendering: 'pixelated' }}
+                style={{ position: 'absolute', top: 0, left: 0, width: width * magZoom, height: height * magZoom, imageRendering: 'pixelated' }}
               />
+              <svg
+                width={width * magZoom}
+                height={height * magZoom}
+                style={{
+                  position: 'absolute', top: 0, left: 0,
+                  transform: `scale(${magZoom})`, transformOrigin: '0 0',
+                  pointerEvents: 'none', zIndex: 10
+                }}
+              >
+                {renderAnnotations()}
+                {renderLive()}
+                {renderSelectionRect()}
+                {renderLassoPolygon()}
+              </svg>
             </div>
             <div style={{
               position: 'absolute', inset: 0,
@@ -1806,11 +1805,40 @@ export function AnnotationCanvas({
                 </div>
 
                 {currentAnn.type.includes('measure') && (
+                  <div style={{ ...rowStyle, borderBottom: '1px solid #3d3e47', paddingBottom: '10px', marginBottom: '4px' }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                      <span style={{ fontSize: '11px', color: '#9aa0ac' }}>Kalibrieren:</span>
+                      <button
+                        onPointerDown={(e) => {
+                          e.stopPropagation();
+                          if (currentAnn.type === 'measure-distance') {
+                            const pts = currentAnn.points;
+                            if (pts.length >= 2) {
+                              onCalibrate?.(pts[0], pts[pts.length - 1]);
+                            }
+                          } else {
+                            // simple start/end if available
+                            onCalibrate?.(currentAnn.start || currentAnn.points?.[0], currentAnn.end || currentAnn.points?.[currentAnn.points.length - 1]);
+                          }
+                          setContextMenu(null);
+                        }}
+                        style={{
+                          padding: '6px 12px', background: '#4f8ef7', color: '#fff',
+                          border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold'
+                        }}
+                      >
+                        Als Referenz für Maßstab nutzen
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {currentAnn.type.includes('measure') && (
                   <div style={rowStyle}>
                     <span>Modus:</span>
                     <div style={{ display: 'flex', gap: '8px' }}>
                       <button
-                        onClick={() => updateAnnotation(docId, page, { ...currentAnn, isNegative: false })}
+                        onPointerDown={(e) => { e.stopPropagation(); updateAnnotation(docId, page, { ...currentAnn, isNegative: false }); }}
                         style={{
                           padding: '4px 10px', borderRadius: '4px', border: 'none',
                           background: currentAnn.isNegative ? '#333' : '#34a853',
@@ -1819,7 +1847,7 @@ export function AnnotationCanvas({
                         + ADD
                       </button>
                       <button
-                        onClick={() => updateAnnotation(docId, page, { ...currentAnn, isNegative: true })}
+                        onPointerDown={(e) => { e.stopPropagation(); updateAnnotation(docId, page, { ...currentAnn, isNegative: true }); }}
                         style={{
                           padding: '4px 10px', borderRadius: '4px', border: 'none',
                           background: currentAnn.isNegative ? '#ea4335' : '#333',
