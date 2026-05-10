@@ -311,4 +311,3 @@ export async function downloadPdfWithAnnotations(doc: OpenDocument) {
     document.body.removeChild(link);
     setTimeout(() => URL.revokeObjectURL(downloadUrl), 1000);
 }
->>>>>>> b5315f5 (feat: Add text wrapping and background color to PDF export, Add external PDF appending feature)
