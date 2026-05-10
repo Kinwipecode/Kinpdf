@@ -1971,10 +1971,10 @@ function TextAnnotationComponent({
 
   const [copyFeedback, setCopyFeedback] = useState(false);
 
-  const { position, id, selected, isOcr, text, fontSize, width, height } = ann;
-  const bg = isOcr
+  const { position, id, selected, isOcr, text, fontSize, width, height, fillColor } = ann;
+  const bg = fillColor || (isOcr
     ? (selected ? 'rgba(255, 255, 255, 0.98)' : (ocrTransparencyEnabled ? 'rgba(255,255,255,0.7)' : 'rgba(255,255,255,0.95)'))
-    : 'rgba(255,255,200,0.95)';
+    : 'rgba(255,255,200,0.95)');
   const border = selected ? '2px solid #4f8ef7' : (isOcr ? '1px solid #4f8ef7' : '1px solid #aaa');
   const color = isOcr ? (selected ? '#4f8ef7' : '#1a1a1a') : '#1a1a1a';
 
@@ -2310,6 +2310,15 @@ function TextAnnotationComponent({
                 <span>Re-OCR</span>
               </button>
             )}
+          </div>
+
+          <div style={{ pointerEvents: 'auto', display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <ColorPicker
+              label=""
+              color={fillColor || (isOcr ? '#ffffff' : '#ffffc8')}
+              onChange={(c) => updateAnnotation(docId, page, { ...ann, fillColor: c })}
+              allowTransparent={true}
+            />
           </div>
 
           <div style={{ pointerEvents: 'auto' }}>

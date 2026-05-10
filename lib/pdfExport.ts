@@ -11,8 +11,85 @@ function hexToColor(hex: string) {
     return rgb(r, g, b);
 }
 
-// Global: Download PDF
-export async function downloadPdfWithAnnotations(doc: OpenDocument) {
+// Helper: Wrap text to fit width
+function wrapText(text: string, maxWidth: number, font: any, fontSize: number): string[] {
+    const lines: string[] = [];
+    const paragraphs = text.split('\n');
+
+    for (const paragraph of paragraphs) {
+        if (!paragraph) {
+            lines.push('');
+            continue;
+        }
+
+        const words = paragraph.split(' ');
+        let currentLine = '';
+
+        for (const word of words) {
+            const testLine = currentLine ? `${currentLine} ${word}` : word;
+            const testWidth = font.widthOfTextAtSize(testLine, fontSize);
+
+            if (testWidth <= maxWidth) {
+                currentLine = testLine;
+            } else {
+                if (currentLine) {
+                    lines.push(currentLine);
+                    currentLine = word;
+                } else {
+                    // Single word is too wide, force break it or just let it be
+                    lines.push(word);
+                    currentLine = '';
+                }
+            }
+        }
+        if (currentLine) lines.push(currentLine);
+    }
+    return lines;
+}
+
+// Append External PDF to current doc
+export async function appendExternalPdf(doc: OpenDocument, externalFileBytes: ArrayBuffer): Promise<{ newFileUrl: string, oldPhysicalCount: number, newPhysicalCount: number }> {
+    let baseDoc: PDFDocument;
+    let oldPhysicalCount = 0;
+    
+    if (doc.fileType === 'pdf') {
+        const existingBytes = await fetch(doc.fileUrl).then(res => res.arrayBuffer());
+        baseDoc = await PDFDocument.load(existingBytes);
+        oldPhysicalCount = baseDoc.getPageCount();
+    } else {
+        baseDoc = await PDFDocument.create();
+        const width = 595.28;
+        const height = 841.89;
+        const page = baseDoc.addPage([width, height]);
+        const imgBytes = await fetch(doc.fileUrl).then(res => res.arrayBuffer());
+        let embeddedImg;
+        if (doc.fileUrl.toLowerCase().includes('.png') || doc.fileName.toLowerCase().endsWith('.png')) {
+            embeddedImg = await baseDoc.embedPng(imgBytes);
+        } else {
+            embeddedImg = await baseDoc.embedJpg(imgBytes);
+        }
+        const dims = embeddedImg.scaleToFit(width - 40, height - 40);
+        page.drawImage(embeddedImg, {
+            x: 20, y: height - dims.height - 20,
+            width: dims.width, height: dims.height
+        });
+        oldPhysicalCount = 1;
+    }
+
+    const extDoc = await PDFDocument.load(externalFileBytes);
+    const copiedPages = await baseDoc.copyPages(extDoc, extDoc.getPageIndices());
+    copiedPages.forEach((page) => baseDoc.addPage(page));
+    
+    const newPhysicalCount = baseDoc.getPageCount();
+    const pdfBytes = await baseDoc.save();
+    const blob = new Blob([pdfBytes as any], { type: 'application/pdf' });
+    const newFileUrl = URL.createObjectURL(blob);
+    
+    return { newFileUrl, oldPhysicalCount, newPhysicalCount };
+}
+
+// Global: Generate Annotated PDF URL
+export async function generateAnnotatedPdfUrl(doc: OpenDocument): Promise<string> {
     let srcDoc: PDFDocument | null = null;
     if (doc.fileType === 'pdf') {
         const existingPdfBytes = await fetch(doc.fileUrl).then(res => res.arrayBuffer());
@@ -98,7 +175,7 @@ export async function downloadPdfWithAnnotations(doc: OpenDocument) {
                         height: Math.abs(ann.end.y - ann.start.y),
                         borderColor: color,
                         borderWidth: strokeWidth,
-                        color: ann.fillColor ? hexToColor(ann.fillColor) : undefined,
+                        color: (ann.fillColor && ann.fillColor !== 'transparent') ? hexToColor(ann.fillColor) : undefined,
                         opacity,
                     });
                     break;
@@ -114,7 +191,7 @@ export async function downloadPdfWithAnnotations(doc: OpenDocument) {
                         yRadius: radiusY,
                         borderColor: color,
                         borderWidth: strokeWidth,
-                        color: ann.fillColor ? hexToColor(ann.fillColor) : undefined,
+                        color: (ann.fillColor && ann.fillColor !== 'transparent') ? hexToColor(ann.fillColor) : undefined,
                         opacity,
                     });
                     break;
@@ -146,20 +223,52 @@ export async function downloadPdfWithAnnotations(doc: OpenDocument) {
 
                 case 'text':
                 case 'callout':
-                    const text = (ann as any).text || '';
-                    if (!text) break;
-                    const tx = (ann as any).position?.x ?? (ann as any).rect?.x ?? 0;
-                    const ty = (ann as any).position?.y ?? (ann as any).rect?.y ?? 0;
-                    const fSize = (ann as any).fontSize || 12;
+                    const annText = (ann as any).text || (ann as any).textContent || '';
+                    if (!annText) break;
 
-                    page.drawText(text, {
-                        x: tx,
-                        y: height - ty - fSize,
-                        size: fSize,
-                        font,
-                        color,
-                        opacity,
-                    });
+                    const textX = (ann as any).position?.x ?? (ann as any).rect?.x ?? 0;
+                    const textY = (ann as any).position?.y ?? (ann as any).rect?.y ?? 0;
+                    const fontSize = (ann as any).fontSize || 13;
+                    const textWidth = (ann as any).width || 400;
+                    const textHeight = (ann as any).height || 100;
+
+                    // Support background color
+                    if (ann.fillColor && ann.fillColor !== 'transparent') {
+                        page.drawRectangle({
+                            x: textX,
+                            y: height - textY - textHeight,
+                            width: textWidth,
+                            height: textHeight,
+                            color: hexToColor(ann.fillColor),
+                            opacity: opacity,
+                        });
+                    }
+
+                    // Use dark color for text if not specified or too light
+                    let tColor = color;
+                    const rgbSum = (tColor as any).red + (tColor as any).green + (tColor as any).blue;
+                    if (rgbSum > 2.7) tColor = rgb(0.1, 0.1, 0.1);
+
+                    // Perform text wrapping
+                    const maxWidth = textWidth - 12; // 6px padding on each side
+                    const wrappedLines = wrapText(annText, maxWidth, font, fontSize);
+                    
+                    const lineHeight = fontSize * 1.4;
+                    const isOcr = (ann as any).isOcr;
+                    const topPadding = isOcr ? 25 : 6;
+                    
+                    for (let i = 0; i < wrappedLines.length; i++) {
+                        const lineY = height - textY - topPadding - fontSize - (i * lineHeight);
+                        // Don't draw if outside the box (optional, but let's keep it simple)
+                        page.drawText(wrappedLines[i], {
+                            x: textX + 6,
+                            y: lineY,
+                            size: fontSize,
+                            font,
+                            color: tColor,
+                            opacity,
+                        });
+                    }
                     break;
 
                 case 'measure-distance':
@@ -187,14 +296,19 @@ export async function downloadPdfWithAnnotations(doc: OpenDocument) {
     }
 
     const pdfBytes = await outDoc.save();
-    // Casting to any to avoid BlobPart compatibility issues in some strict TS environments
     const blob = new Blob([pdfBytes as any], { type: 'application/pdf' });
-    const downloadUrl = URL.createObjectURL(blob);
+    return URL.createObjectURL(blob);
+}
+
+// Global: Download PDF
+export async function downloadPdfWithAnnotations(doc: OpenDocument) {
+    const downloadUrl = await generateAnnotatedPdfUrl(doc);
     const link = document.createElement('a');
     link.href = downloadUrl;
     link.download = `exported_${doc.fileName.replace('.pdf', '')}.pdf`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
-    URL.revokeObjectURL(downloadUrl);
+    setTimeout(() => URL.revokeObjectURL(downloadUrl), 1000);
 }
+>>>>>>> b5315f5 (feat: Add text wrapping and background color to PDF export, Add external PDF appending feature)

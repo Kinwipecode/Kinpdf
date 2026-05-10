@@ -180,19 +180,28 @@ export function Ribbon({ onOpenFile, activeDocId }: RibbonProps) {
     setZoom(doc.id, 1.0);
   };
 
-  const handlePrint = () => {
-    if (!doc?.fileUrl) return;
+  const handlePrint = async () => {
+    if (!doc) return;
+    
+    // Create an annotated PDF URL instead of using the raw file
+    const { generateAnnotatedPdfUrl } = await import('@/lib/pdfExport');
+    const annotatedUrl = await generateAnnotatedPdfUrl(doc);
+    
     const iframe = document.createElement('iframe');
     iframe.style.position = 'absolute';
     iframe.style.width = '0';
     iframe.style.height = '0';
     iframe.style.border = 'none';
-    iframe.src = doc.fileUrl;
+    iframe.src = annotatedUrl;
     document.body.appendChild(iframe);
+    
     iframe.onload = () => {
       setTimeout(() => {
         iframe.contentWindow?.print();
-        setTimeout(() => document.body.removeChild(iframe), 60000);
+        setTimeout(() => {
+            document.body.removeChild(iframe);
+            URL.revokeObjectURL(annotatedUrl);
+        }, 60000);
       }, 500);
     };
   };
@@ -529,6 +538,31 @@ export function Ribbon({ onOpenFile, activeDocId }: RibbonProps) {
                 tooltip="Leere Seite nach der aktuellen Seite einfügen"
                 onClick={() => {
                   if (activeDocId && doc) insertPage(activeDocId, doc.currentPage);
+                }}
+              />
+              <ToolBtn
+                icon={<MdFolderOpen />}
+                label="Externe PDF"
+                tooltip="Eine externe PDF nach der aktuellen Seite einfügen"
+                onClick={() => {
+                  if (!activeDocId || !doc) return;
+                  const input = document.createElement('input');
+                  input.type = 'file';
+                  input.accept = 'application/pdf';
+                  input.onchange = async (e) => {
+                    const file = (e.target as HTMLInputElement).files?.[0];
+                    if (!file) return;
+                    try {
+                      const buffer = await file.arrayBuffer();
+                      const { appendExternalPdf } = await import('@/lib/pdfExport');
+                      const { newFileUrl, oldPhysicalCount, newPhysicalCount } = await appendExternalPdf(doc, buffer);
+                      useAppStore.getState().appendExternalPages(doc.id, newFileUrl, oldPhysicalCount, newPhysicalCount);
+                    } catch (err) {
+                      console.error("Failed to append PDF:", err);
+                      alert("Fehler beim Einfügen der PDF.");
+                    }
+                  };
+                  input.click();
                 }}
               />
             </RibbonGroup>

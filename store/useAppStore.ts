@@ -76,6 +76,7 @@ interface AppState {
   movePage: (docId: string, fromIndex: number, toIndex: number) => void;
   movePageRelative: (docId: string, logicalPageIndex: number, delta: number) => void;
   movePageRange: (docId: string, startIdx: number, endIdx: number, targetIdx: number) => void;
+  appendExternalPages: (docId: string, newFileUrl: string, oldPhysicalCount: number, newPhysicalCount: number) => void;
 }
 
 export const useAppStore = create<AppState>()(
@@ -412,6 +413,26 @@ export const useAppStore = create<AppState>()(
 
         doc.pageOrder.splice(adjustedTarget, 0, ...removed);
         doc.currentPage = adjustedTarget + 1;
+      }),
+
+    appendExternalPages: (docId, newFileUrl, oldPhysicalCount, newPhysicalCount) =>
+      set((state) => {
+        const doc = state.openDocuments.find((d) => d.id === docId);
+        if (!doc) return;
+        
+        doc.fileUrl = newFileUrl;
+        doc.fileType = 'pdf'; // In case it was an image
+        
+        // The newly appended physical pages start at oldPhysicalCount + 1
+        const newPages = Array.from(
+          { length: newPhysicalCount - oldPhysicalCount }, 
+          (_, i) => oldPhysicalCount + i + 1
+        );
+        
+        // Insert right after the current page
+        doc.pageOrder.splice(doc.currentPage, 0, ...newPages);
+        doc.pageCount = doc.pageOrder.length;
+        doc.currentPage = doc.currentPage + 1; // Move to first new page
       }),
   }))
 );
