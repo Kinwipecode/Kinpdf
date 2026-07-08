@@ -20,16 +20,22 @@ export function StatusBar({ activeDocId, cursorPos }: StatusBarProps) {
 
   return (
     <div className="status-bar">
+      <div className="status-item" style={{ marginRight: 4 }}>
+        <span style={{ color: 'var(--text-secondary)', marginRight: 4 }}>Version:</span>
+        <span style={{ fontWeight: 600, color: '#ffffff' }}>v1.0.0</span>
+      </div>
+      <div className="sep" />
+
       {doc && (
         <div className="status-item">
-          <span>Seite {doc.currentPage} von {doc.pageCount || '?'}</span>
+          <span>Seite <strong style={{ color: '#ffffff', fontWeight: 600 }}>{doc.currentPage}</strong> von <strong style={{ color: '#ffffff', fontWeight: 600 }}>{doc.pageCount || '?'}</strong></span>
         </div>
       )}
 
       {doc && (
-        <div className="status-item" style={{ flex: 1, justifyContent: 'center', gap: 12 }}>
+        <div className="status-item" style={{ flex: 1, justifyContent: 'center', display: 'flex', alignItems: 'center', gap: 12 }}>
           <button className="status-zoom-btn" onClick={() => adjustZoom(-0.1)}>-</button>
-          <div className="zoom-slider-container">
+          <div className="zoom-slider-container" style={{ display: 'flex', alignItems: 'center' }}>
             <input
               type="range"
               min="0.1"
@@ -37,29 +43,33 @@ export function StatusBar({ activeDocId, cursorPos }: StatusBarProps) {
               step="0.1"
               value={doc.zoom}
               onChange={(e) => setZoom(doc.id, parseFloat(e.target.value))}
+              className="zoom-slider"
             />
           </div>
           <button className="status-zoom-btn" onClick={() => adjustZoom(0.1)}>+</button>
-          <span style={{ minWidth: 40, textAlign: 'right' }}>{Math.round(doc.zoom * 100)}%</span>
+          <span style={{ minWidth: 44, textAlign: 'right', color: '#ffffff', fontWeight: 600 }}>{Math.round(doc.zoom * 100)}%</span>
         </div>
       )}
 
       <div className="status-item">
-        <span style={{ color: 'var(--text-muted)', marginRight: 4 }}>Werkzeug:</span>
-        <span style={{ fontWeight: 500, color: '#4f8ef7' }}>{translateTool(activeTool)}</span>
+        <span style={{ color: 'var(--text-secondary)', marginRight: 4 }}>Werkzeug:</span>
+        <span style={{ fontWeight: 600, color: '#4f8ef7' }}>{translateTool(activeTool)}</span>
       </div>
 
       <div className="status-item" style={{ minWidth: 120 }}>
         {cursorPos ? (
-          <span>{Math.round(cursorPos.x)}, {Math.round(cursorPos.y)} px</span>
+          <span>
+            <strong style={{ color: '#ffffff', fontWeight: 600 }}>{Math.round(cursorPos.x)}</strong>,{' '}
+            <strong style={{ color: '#ffffff', fontWeight: 600 }}>{Math.round(cursorPos.y)}</strong> px
+          </span>
         ) : (
-          <span style={{ color: 'var(--text-muted)' }}>—</span>
+          <span style={{ color: 'var(--text-secondary)' }}>—</span>
         )}
       </div>
       {doc && (
         <>
           <div className="sep" />
-          <span style={{ color: 'var(--text-muted)' }}>{doc.fileName}</span>
+          <span style={{ color: 'var(--text-secondary)', fontWeight: 500 }}>{doc.fileName}</span>
         </>
       )}
     </div>

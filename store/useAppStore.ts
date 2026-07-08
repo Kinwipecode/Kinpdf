@@ -24,6 +24,12 @@ interface AppState {
   propertiesPanelOpen: boolean;
   ocrTransparencyEnabled: boolean;
   setOcrTransparency: (enabled: boolean) => void;
+  ocrFontSize: number;
+  ocrTextColor: string;
+  ocrBgColor: string;
+  setOcrFontSize: (size: number) => void;
+  setOcrTextColor: (color: string) => void;
+  setOcrBgColor: (color: string) => void;
   calculatorOpen: boolean;
   calculatorColCount: number;
   toggleCalculator: () => void;
@@ -92,6 +98,9 @@ export const useAppStore = create<AppState>()(
     sidebarOpen: true,
     propertiesPanelOpen: false,
     ocrTransparencyEnabled: false,
+    ocrFontSize: 10,
+    ocrTextColor: '#1a1a1a',
+    ocrBgColor: '#ffffff',
     calculatorOpen: false,
     calculatorColCount: 1,
     toggleCalculator: () => set((state) => { state.calculatorOpen = !state.calculatorOpen; }),
@@ -190,6 +199,21 @@ export const useAppStore = create<AppState>()(
     setOcrTransparency: (enabled) =>
       set((state) => {
         state.ocrTransparencyEnabled = enabled;
+      }),
+
+    setOcrFontSize: (size) =>
+      set((state) => {
+        state.ocrFontSize = size;
+      }),
+
+    setOcrTextColor: (color) =>
+      set((state) => {
+        state.ocrTextColor = color;
+      }),
+
+    setOcrBgColor: (color) =>
+      set((state) => {
+        state.ocrBgColor = color;
       }),
 
     setCurrentPage: (docId, page) =>

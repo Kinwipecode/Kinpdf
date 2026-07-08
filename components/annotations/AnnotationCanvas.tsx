@@ -46,6 +46,7 @@ export function AnnotationCanvas({
   const {
     activeTool, setActiveTool, openDocuments, addAnnotation, addAnnotations, updateAnnotation,
     deleteAnnotation, selectAnnotation, selectAnnotations, deleteSelectedAnnotation, activeColor, activeFillColor, setActiveFillColor, strokeWidth, ocrTransparencyEnabled,
+    ocrFontSize, ocrTextColor, ocrBgColor,
   } = useAppStore();
 
   const doc = openDocuments.find((d) => d.id === docId);
@@ -69,6 +70,141 @@ export function AnnotationCanvas({
   const [, setTick] = useState(0);
 
   const rerender = useCallback(() => setTick((t) => t + 1), []);
+
+  const [ocrScanning, setOcrScanning] = useState(false);
+  const [ocrProgress, setOcrProgress] = useState(0);
+  const [ocrArea, setOcrArea] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
+
+  const runOCR = async (x: number, y: number, w: number, h: number) => {
+    setOcrScanning(true);
+    setOcrProgress(0);
+    setOcrArea({ x, y, w, h });
+
+    try {
+      console.log('📦 Lade Tesseract.js in AnnotationCanvas...');
+      const TesseractModule = await import('tesseract.js');
+      const Tesseract = (TesseractModule as any).default || TesseractModule;
+      
+      const svg = svgRef.current;
+      const container = svg?.closest('.pdf-page-container');
+      const pdfCanvas = container?.querySelector('canvas') as HTMLCanvasElement;
+      if (!pdfCanvas) {
+        throw new Error('PDF-Seite nicht gefunden');
+      }
+
+      // Bestimme den Skalierungsfaktor des Original-Canvas (DPR)
+      const rect = pdfCanvas.getBoundingClientRect();
+      const canvasDpr = pdfCanvas.width / rect.width;
+
+      // Crop coordinates in screen pixels
+      const zoom = doc?.zoom ?? 1.0;
+      const screenX = x * zoom;
+      const screenY = y * zoom;
+      const screenW = w * zoom;
+      const screenH = h * zoom;
+
+      // Berücksichtige den DPI-Scale für bessere Erkennung
+      const ocrDpr = 3.0;
+      const tempCanvas = document.createElement('canvas');
+      tempCanvas.width = screenW * ocrDpr;
+      tempCanvas.height = screenH * ocrDpr;
+      const tempCtx = tempCanvas.getContext('2d');
+
+      if (tempCtx) {
+        tempCtx.fillStyle = 'white';
+        tempCtx.fillRect(0, 0, tempCanvas.width, tempCanvas.height);
+        tempCtx.scale(ocrDpr, ocrDpr);
+
+        tempCtx.drawImage(
+          pdfCanvas,
+          screenX * canvasDpr, screenY * canvasDpr,
+          screenW * canvasDpr, screenH * canvasDpr,
+          0, 0, screenW, screenH
+        );
+      }
+
+      const result = await Tesseract.recognize(
+        tempCanvas,
+        'deu+eng',
+        {
+          logger: (m: any) => {
+            if (m.status === 'recognizing text') {
+              setOcrProgress(Math.round(m.progress * 100));
+            }
+          }
+        }
+      );
+
+      const data = result.data as any;
+      const lines = data.lines || [];
+
+      let reconstructedText = "";
+      let lastLineBottom = -1;
+
+      lines.forEach((line: any) => {
+        const lineText = line.text.replace(/\s+$/g, "");
+        if (!lineText.trim()) return;
+
+        const currentLineTop = line.bbox.y0 / ocrDpr;
+        const currentLineHeight = (line.bbox.y1 - line.bbox.y0) / ocrDpr;
+
+        if (lastLineBottom !== -1) {
+          const gap = currentLineTop - lastLineBottom;
+          if (gap > currentLineHeight * 0.80) {
+            const numNewLines = Math.max(1, Math.round(gap / (currentLineHeight * 0.9)));
+            for (let i = 0; i < numNewLines; i++) {
+              reconstructedText += "\n";
+            }
+          }
+        }
+
+        reconstructedText += lineText + "\n";
+        lastLineBottom = line.bbox.y1 / ocrDpr;
+      });
+
+      let finalAreaText = reconstructedText.trim();
+      if (!finalAreaText) {
+        finalAreaText = (data.text || "").trim();
+      }
+
+      if (!finalAreaText) {
+        throw new Error("Kein Text erkannt");
+      }
+
+      // Add text annotation to the store for this specific page!
+      const annotationId = Date.now().toString() + Math.random().toString(36).substr(2, 9);
+      const textAnnotation = {
+        id: annotationId,
+        type: 'text' as const,
+        page: page,
+        color: ocrTextColor,
+        fillColor: ocrBgColor,
+        opacity: 1,
+        createdAt: Date.now(),
+        position: { x, y },
+        text: finalAreaText,
+        fontSize: ocrFontSize,
+        isOcr: true,
+        width: w,
+        height: Math.max(80, h),
+        selected: true
+      };
+
+      addAnnotation(docId, page, textAnnotation);
+      selectAnnotation(docId, page, annotationId);
+      setActiveTool('cursor');
+
+    } catch (error: any) {
+      console.error('❌ OCR Fehler:', error);
+      alert("OCR fehlgeschlagen: " + (error.message || "Unbekannter Fehler"));
+      setActiveTool('cursor');
+    } finally {
+      setOcrScanning(false);
+      setOcrArea(null);
+      drawing.current = null;
+      rerender();
+    }
+  };
 
   const finishAreaMeasurement = useCallback(() => {
     if (activeTool === 'measure-area') {
@@ -945,6 +1081,13 @@ export function AnnotationCanvas({
     const e = d.end ? { x: d.end.x * pdfScale, y: d.end.y * pdfScale } : null;
     const p = d.points ? d.points.map(pt => ({ x: pt.x * pdfScale, y: pt.y * pdfScale })) : [];
 
+    if (d.type === 'ocr-select' && s && e) {
+      const x = Math.min(s.x, e.x);
+      const y = Math.min(s.y, e.y);
+      const w = Math.abs(e.x - s.x);
+      const h = Math.abs(e.y - s.y);
+      return <rect x={x} y={y} width={w} height={h} fill="rgba(79, 142, 247, 0.15)" stroke="#4f8ef7" strokeWidth={2} strokeDasharray="4 2" />;
+    }
     if (d.type === 'highlight' && s && e) {
       const x = Math.min(s.x, e.x);
       const y = Math.min(s.y, e.y);
@@ -1526,6 +1669,20 @@ export function AnnotationCanvas({
         text: '',
         fontSize: 13,
       } as TextAnnotation);
+    } else if (activeTool === 'ocr-select') {
+      const x = Math.min(d.start.x, d.end.x);
+      const y = Math.min(d.start.y, d.end.y);
+      const w = Math.abs(d.end.x - d.start.x);
+      const h = Math.abs(d.end.y - d.start.y);
+
+      if (w > 5 && h > 5) {
+        runOCR(x, y, w, h);
+      } else {
+        drawing.current = null;
+        setActiveTool('cursor');
+        rerender();
+      }
+      return;
     } else if (activeTool === 'measure-circle') {
       const dVal = dist(d.start, d.end);
       const radius = dVal / 2;
@@ -1662,6 +1819,46 @@ export function AnnotationCanvas({
         {renderSelectionRect()}
         {renderLassoPolygon()}
       </svg>
+      {ocrScanning && ocrArea && (
+        <div style={{
+          position: 'absolute',
+          left: ocrArea.x * pdfScale,
+          top: ocrArea.y * pdfScale,
+          width: ocrArea.w * pdfScale,
+          height: ocrArea.h * pdfScale,
+          background: 'rgba(255, 255, 255, 0.75)',
+          backdropFilter: 'blur(4px)',
+          border: '2px dashed #4f8ef7',
+          borderRadius: '4px',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: '8px',
+          padding: '12px',
+          zIndex: 10000,
+          boxSizing: 'border-box',
+          pointerEvents: 'auto',
+        }}>
+          <div style={{ fontSize: '11px', fontWeight: 'bold', color: '#1a73e8', textShadow: '0 1px 2px rgba(255,255,255,0.8)', textAlign: 'center' }}>
+            Erkenne Text ({ocrProgress}%)
+          </div>
+          <div style={{
+            width: '80%',
+            height: '4px',
+            background: 'rgba(0,0,0,0.1)',
+            borderRadius: '2px',
+            overflow: 'hidden'
+          }}>
+            <div style={{
+              height: '100%',
+              width: `${ocrProgress}%`,
+              background: '#4f8ef7',
+              transition: 'width 0.2s ease-out'
+            }} />
+          </div>
+        </div>
+      )}
       {(() => {
         if (!showMagnifier || !rawPointerPos || !localPointerPos || !svgRef.current) return null;
         const canvas = svgRef.current.closest('.pdf-page-container')?.querySelector('canvas');
@@ -1727,28 +1924,6 @@ export function AnnotationCanvas({
           </div>
         );
       })()}
-
-      <div
-        className="text-annotations-overlay"
-        style={{
-          position: 'absolute', inset: 0,
-          pointerEvents: 'none', // Changed to none, components will have auto
-          zIndex: 200
-        }}
-      >
-        {annotations.filter(a => a.type === 'text').map(ann => (
-          <foreignObject key={ann.id} x={0} y={0} width="100%" height="100%" pointerEvents="none">
-            <TextAnnotationComponent
-              ann={ann as TextAnnotation}
-              docId={docId}
-              page={page}
-              ocrTransparencyEnabled={ocrTransparencyEnabled}
-              svgRef={svgRef}
-              pdfScale={pdfScale}
-            />
-          </foreignObject>
-        ))}
-      </div>
 
       {/* ─── Context Menu ─── */}
       {contextMenu && (
@@ -1976,7 +2151,7 @@ function TextAnnotationComponent({
     ? (selected ? 'rgba(255, 255, 255, 0.98)' : (ocrTransparencyEnabled ? 'rgba(255,255,255,0.7)' : 'rgba(255,255,255,0.95)'))
     : 'rgba(255,255,200,0.95)');
   const border = selected ? '2px solid #4f8ef7' : (isOcr ? '1px solid #4f8ef7' : '1px solid #aaa');
-  const color = isOcr ? (selected ? '#4f8ef7' : '#1a1a1a') : '#1a1a1a';
+  const color = ann.color || '#1a1a1a';
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [isResizing, setIsResizing] = useState<string | null>(null);
@@ -1989,6 +2164,10 @@ function TextAnnotationComponent({
     origW: number;
     origH: number;
   } | null>(null);
+
+  const [isDraggingText, setIsDraggingText] = useState(false);
+  const dragStartRef = useRef<{ clientX: number; clientY: number; startX: number; startY: number } | null>(null);
+  const holdTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // Re-OCR handle
   const onReOCR = async () => {
@@ -2025,12 +2204,13 @@ function TextAnnotationComponent({
       console.log("✂️ Extrahiere Bereich für OCR...", {
         x: ann.position.x, y: ann.position.y,
         w: currentWidth, h: currentHeight,
+        pdfScale,
         canvasDpr
       });
 
       tempCtx.drawImage(
         canvas,
-        ann.position.x * canvasDpr, ann.position.y * canvasDpr,
+        ann.position.x * pdfScale * canvasDpr, ann.position.y * pdfScale * canvasDpr,
         currentWidth * canvasDpr, currentHeight * canvasDpr,
         0, 0, currentWidth, currentHeight
       );
@@ -2055,8 +2235,8 @@ function TextAnnotationComponent({
 
         if (lastLineBottom !== -1) {
           const gap = currentLineTop - lastLineBottom;
-          // Ab 20% Zeilenhöhe wird ein Abstand als Absatz gewertet
-          if (gap > currentLineHeight * 0.20) {
+          // Ab 80% Zeilenhöhe wird ein Abstand als Absatz gewertet
+          if (gap > currentLineHeight * 0.80) {
             const numNewLines = Math.max(1, Math.round(gap / (currentLineHeight * 0.9)));
             for (let i = 0; i < numNewLines; i++) reconstructedText += "\n";
           }
@@ -2145,6 +2325,90 @@ function TextAnnotationComponent({
     };
   }, [isResizing, ann, docId, page, updateAnnotation]);
 
+  // Drag text annotation logic (1s hold)
+  useEffect(() => {
+    if (!isDraggingText) return;
+    const handlePointerMove = (e: PointerEvent) => {
+      const state = dragStartRef.current;
+      if (!state) return;
+      const dx = (e.clientX - state.clientX) / pdfScale;
+      const dy = (e.clientY - state.clientY) / pdfScale;
+      updateAnnotation(docId, page, {
+        ...ann,
+        position: { x: state.startX + dx, y: state.startY + dy }
+      });
+    };
+
+    const handlePointerUp = () => {
+      setIsDraggingText(false);
+      dragStartRef.current = null;
+    };
+
+    window.addEventListener('pointermove', handlePointerMove);
+    window.addEventListener('pointerup', handlePointerUp);
+    return () => {
+      window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('pointerup', handlePointerUp);
+    };
+  }, [isDraggingText, ann, docId, page, updateAnnotation, pdfScale]);
+
+  // Clean up timer on unmount
+  useEffect(() => {
+    return () => {
+      if (holdTimeoutRef.current) clearTimeout(holdTimeoutRef.current);
+    };
+  }, []);
+
+  const handleDragPointerDown = (e: React.PointerEvent) => {
+    // Only handle left mouse button drag-hold
+    if (e.button !== 0) return;
+
+    const startX = e.clientX;
+    const startY = e.clientY;
+
+    if (holdTimeoutRef.current) clearTimeout(holdTimeoutRef.current);
+
+    holdTimeoutRef.current = setTimeout(() => {
+      setIsDraggingText(true);
+      dragStartRef.current = {
+        clientX: startX,
+        clientY: startY,
+        startX: ann.position.x,
+        startY: ann.position.y
+      };
+
+      if (document.activeElement instanceof HTMLElement) {
+        document.activeElement.blur();
+      }
+      
+      holdTimeoutRef.current = null;
+    }, 1000);
+
+    const cancelHold = (moveEvent: PointerEvent) => {
+      const dx = Math.abs(moveEvent.clientX - startX);
+      const dy = Math.abs(moveEvent.clientY - startY);
+      if (dx > 5 || dy > 5) {
+        if (holdTimeoutRef.current) {
+          clearTimeout(holdTimeoutRef.current);
+          holdTimeoutRef.current = null;
+        }
+        window.removeEventListener('pointermove', cancelHold);
+      }
+    };
+
+    const releaseHold = () => {
+      if (holdTimeoutRef.current) {
+        clearTimeout(holdTimeoutRef.current);
+        holdTimeoutRef.current = null;
+      }
+      window.removeEventListener('pointermove', cancelHold);
+      window.removeEventListener('pointerup', releaseHold);
+    };
+
+    window.addEventListener('pointermove', cancelHold);
+    window.addEventListener('pointerup', releaseHold);
+  };
+
   const handleResizeStart = (dir: string, e: React.PointerEvent) => {
     e.stopPropagation();
     e.preventDefault();
@@ -2192,11 +2456,13 @@ function TextAnnotationComponent({
         width: (width || 400) * pdfScale,
         height: (height || 100) * pdfScale,
         pointerEvents: 'auto',
-        outline: 'none'
+        outline: 'none',
+        cursor: isDraggingText ? 'move' : 'default'
       }}
       onPointerDown={(e) => {
         e.stopPropagation();
         if (!selected) selectAnnotation(docId, page, id);
+        handleDragPointerDown(e);
       }}
       onMouseDown={(e) => e.stopPropagation()}
     >
@@ -2221,11 +2487,12 @@ function TextAnnotationComponent({
           color: color,
           padding: isOcr ? `${25 * pdfScale}px ${6 * pdfScale}px ${6 * pdfScale}px ${6 * pdfScale}px` : `${6 * pdfScale}px`,
           fontFamily: 'Arial, sans-serif',
-          cursor: 'text',
+          cursor: isDraggingText ? 'move' : 'text',
+          pointerEvents: isDraggingText ? 'none' : 'auto',
           whiteSpace: 'pre-wrap',
           overflow: 'auto',
           display: 'block',
-          lineHeight: 1.4,
+          lineHeight: 1.2,
           boxSizing: 'border-box',
           transition: 'background 0.15s ease-out'
         }}

@@ -10,14 +10,14 @@ import {
   MdOpacity, MdUndo, MdRedo, MdTimeline, MdArrowDropDown,
   MdArrowRightAlt, MdStraight, MdFolderOpen, MdSave, MdPrint,
   MdTrendingUp, MdShortcut, MdArrowRight, MdCalculate, MdFunctions,
-  MdAddBox, MdDeleteSweep, MdArrowUpward, MdArrowDownward, MdContentCopy
+  MdAddBox, MdDeleteSweep, MdArrowUpward, MdArrowDownward, MdContentCopy,
+  MdDocumentScanner
 } from 'react-icons/md';
 import { BsVectorPen } from 'react-icons/bs';
 import { BiEraser } from 'react-icons/bi';
 import { TbRulerMeasure, TbLasso } from 'react-icons/tb';
 import { useAppStore, useActiveDocument } from '@/store/useAppStore';
 import type { ToolType } from '@/types';
-import { OCRButton } from './OCRButton';
 import { ColorPicker } from './ColorPicker';
 import { downloadPdfWithAnnotations } from '@/lib/pdfExport';
 
@@ -163,7 +163,10 @@ export function Ribbon({ onOpenFile, activeDocId }: RibbonProps) {
     ocrTransparencyEnabled, setOcrTransparency, calculatorOpen, toggleCalculator,
     distCalculatorOpen, toggleDistCalculator, activeDocumentId,
     magZoom, setMagZoom,
-    deletePage, insertPage, movePage, movePageRelative, movePageRange
+    deletePage, insertPage, movePage, movePageRelative, movePageRange,
+    ocrFontSize, setOcrFontSize,
+    ocrTextColor, setOcrTextColor,
+    ocrBgColor, setOcrBgColor
   } = useAppStore();
 
   const transparencyTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -206,30 +209,6 @@ export function Ribbon({ onOpenFile, activeDocId }: RibbonProps) {
     };
   };
 
-  const handleOCRComplete = (annotations: { text: string; x: number; y: number; width: number; height: number; fontSize?: number }[]) => {
-    if (!doc) return;
-    console.log('📥 Ribbon: OCR Complete empfangen', annotations.length, 'Annotationen');
-    // Füge die OCR-Texte als Annotationen hinzu
-    const textAnnotations = annotations.map(ann => ({
-      id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
-      type: 'text' as const,
-      page: doc.currentPage,
-      color: 'rgba(79, 142, 247, 0.3)',
-      opacity: 1,
-      createdAt: Date.now(),
-      position: { x: ann.x, y: ann.y },
-      text: ann.text,
-      fontSize: ann.fontSize || 13,
-      isOcr: true,
-      width: ann.width,
-      height: ann.height,
-      selected: true // Auto-select so it can be deleted immediately
-    }));
-    console.log('📤 Ribbon: Sende', textAnnotations.length, 'Annotationen an Store');
-    // Verwende die addAnnotations Funktion aus dem Store
-    addAnnotations(doc.id, doc.currentPage, textAnnotations);
-    console.log('✅ Ribbon: Annotationen gesendet');
-  };
 
   const handleSave = async () => {
     if (doc) {
@@ -332,18 +311,8 @@ export function Ribbon({ onOpenFile, activeDocId }: RibbonProps) {
                 onClick={() => doc && deleteSelectedAnnotation(doc.id)}
               />
             </RibbonGroup>
-            <RibbonGroup label="OCR">
-              {doc && (
-                <OCRButton
-                  docId={doc.id}
-                  currentPage={doc.currentPage}
-                  onOCRComplete={handleOCRComplete}
-                  activeTool={activeTool}
-                  setActiveTool={setActiveTool}
-                />
-              )}
-            </RibbonGroup>
-            <RibbonGroup label="OCR">
+            <RibbonGroup label="OCR Werkzeug">
+              <ToolBtn icon={<MdDocumentScanner />} label="OCR Scannen" tool="ocr-select" tooltip="Texterkennung (OCR) - Bereich markieren zum Scannen" />
               <ToolBtn
                 icon={<MdOpacity />}
                 label="Transparenz"
@@ -368,7 +337,44 @@ export function Ribbon({ onOpenFile, activeDocId }: RibbonProps) {
                 tooltip="OCR-Textboxen für 5 Sek. transparent machen"
               />
             </RibbonGroup>
-            <RibbonGroup label="Farbe">
+            <RibbonGroup label="OCR-Einstellungen">
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '3px', minWidth: '80px', padding: '0 4px' }}>
+                <span style={{ fontSize: '10px', color: '#94a3b8', fontWeight: 'bold' }}>TEXTGRÖßE:</span>
+                <select
+                  value={ocrFontSize}
+                  onChange={(e) => setOcrFontSize(parseInt(e.target.value) || 10)}
+                  style={{
+                    width: '76px',
+                    background: '#1e293b',
+                    border: '1px solid #475569',
+                    borderRadius: '4px',
+                    color: '#f8fafc',
+                    fontSize: '12px',
+                    padding: '3px 4px',
+                    outline: 'none',
+                    cursor: 'pointer'
+                  }}
+                >
+                  {[6, 7, 8, 9, 10, 11, 12, 13, 14, 16, 18, 20, 24].map(sz => (
+                     <option key={sz} value={sz}>{sz} px</option>
+                  ))}
+                </select>
+              </div>
+              <div style={{ borderLeft: '1px solid rgba(255,255,255,0.1)', height: '40px', margin: '0 8px' }} />
+              <ColorPicker
+                label="Textfarbe"
+                color={ocrTextColor}
+                onChange={setOcrTextColor}
+                allowTransparent={false}
+              />
+              <ColorPicker
+                label="Hintergrund"
+                color={ocrBgColor}
+                onChange={setOcrBgColor}
+                allowTransparent={true}
+              />
+            </RibbonGroup>
+            <RibbonGroup label="Farbe (Zeichnen)">
               <ColorPicker
                 label="Farbe"
                 color={activeColor}
