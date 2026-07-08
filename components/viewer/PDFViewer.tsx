@@ -88,6 +88,7 @@ function PDFPage({
         page.cleanup();
       } else if (fileType === 'image' && fileUrl) {
         const img = new Image();
+        img.crossOrigin = 'anonymous';
         img.src = fileUrl;
         try {
           await img.decode();
