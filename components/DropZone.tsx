@@ -33,7 +33,7 @@ export function DropZone({ onFilesLoaded }: DropZoneProps) {
 
   const loadBrowserPage = async (targetUrl: string) => {
     try {
-      const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(targetUrl)}`;
+      const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}`;
       const res = await fetch(proxyUrl);
       if (!res.ok) throw new Error();
       let html = await res.text();
