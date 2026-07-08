@@ -1,5 +1,5 @@
 'use client';
-import { useRef, useState } from 'react';
+import { useRef, useState, useEffect } from 'react';
 import { MdUploadFile, MdPictureAsPdf, MdLanguage } from 'react-icons/md';
 import { useAppStore } from '@/store/useAppStore';
 
@@ -14,8 +14,16 @@ export function DropZone({ onFilesLoaded }: DropZoneProps) {
   const { openDocument } = useAppStore();
   const [showUrlModal, setShowUrlModal] = useState(false);
   const [url, setUrl] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [errorMsg, setErrorMsg] = useState('');
+  
+  // Interactive Browser State
+  const [isBrowsing, setIsBrowsing] = useState(false);
+  const [browserUrl, setBrowserUrl] = useState('');
+  const [browserInputUrl, setBrowserInputUrl] = useState('');
+  const [iframeSrcDoc, setIframeSrcDoc] = useState('');
+  const [captureMode, setCaptureMode] = useState<'viewport' | 'full'>('viewport');
+  const [captureLoading, setCaptureLoading] = useState(false);
+  const [captureError, setCaptureError] = useState('');
+  const [iframeScrollTop, setIframeScrollTop] = useState(0);
 
   const handleFiles = (files: FileList | null) => {
     if (!files) return;
@@ -23,22 +31,107 @@ export function DropZone({ onFilesLoaded }: DropZoneProps) {
     if (pdfs.length > 0) onFilesLoaded(pdfs);
   };
 
-  const handleLoadUrl = async (e: React.FormEvent) => {
+  const loadBrowserPage = async (targetUrl: string) => {
+    try {
+      const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(targetUrl)}`;
+      const res = await fetch(proxyUrl);
+      if (!res.ok) throw new Error();
+      let html = await res.text();
+      
+      // Inject base tag to resolve absolute base path
+      const baseTag = `<base href="${targetUrl}">`;
+      html = html.replace('<head>', `<head>${baseTag}`);
+      
+      // Inject a script to intercept link clicks and communicate navigation back to the parent
+      const scriptInject = `
+        <script>
+          // Intercept link clicks to notify parent app
+          document.addEventListener('click', (e) => {
+            const link = e.target.closest('a');
+            if (link) {
+              const rawHref = link.getAttribute('href');
+              if (rawHref) {
+                e.preventDefault();
+                // Resolve it relative to targetUrl!
+                try {
+                  const resolvedUrl = new URL(rawHref, document.baseURI).href;
+                  window.parent.postMessage({ type: 'NAVIGATE', url: resolvedUrl }, '*');
+                } catch (err) {
+                  // Fallback to absolute href
+                  window.parent.postMessage({ type: 'NAVIGATE', url: link.href }, '*');
+                }
+              }
+            }
+          });
+          
+          // Periodically notify scroll position
+          document.addEventListener('scroll', () => {
+            window.parent.postMessage({ 
+              type: 'SCROLL', 
+              scrollTop: window.pageYOffset || document.documentElement.scrollTop 
+            }, '*');
+          });
+        </script>
+      `;
+      html = html.replace('</body>', `${scriptInject}</body>`);
+      setIframeSrcDoc(html);
+    } catch (err) {
+      // Fallback to direct iframe source if proxy fails
+      setIframeSrcDoc('');
+    }
+  };
+
+  // Listen to postMessage from the iframe proxy
+  useEffect(() => {
+    const handleMessage = (e: MessageEvent) => {
+      if (e.data && typeof e.data === 'object') {
+        if (e.data.type === 'NAVIGATE') {
+          const newUrl = e.data.url;
+          setBrowserUrl(newUrl);
+          setBrowserInputUrl(newUrl);
+          loadBrowserPage(newUrl);
+        } else if (e.data.type === 'SCROLL') {
+          setIframeScrollTop(e.data.scrollTop || 0);
+        }
+      }
+    };
+    window.addEventListener('message', handleMessage);
+    return () => window.removeEventListener('message', handleMessage);
+  }, []);
+
+  const handleStartBrowsing = (e: React.FormEvent) => {
     e.preventDefault();
     if (!url.trim()) return;
-    setLoading(true);
-    setErrorMsg('');
     
-    // Add protocol if missing
     let targetUrl = url.trim();
     if (!/^https?:\/\//i.test(targetUrl)) {
       targetUrl = 'https://' + targetUrl;
     }
     
+    setBrowserUrl(targetUrl);
+    setBrowserInputUrl(targetUrl);
+    setIsBrowsing(true);
+    setShowUrlModal(false);
+    setUrl('');
+    loadBrowserPage(targetUrl);
+  };
+
+  const handleCaptureCurrentPage = async () => {
+    if (!browserUrl) return;
+    setCaptureLoading(true);
+    setCaptureError('');
+    
     try {
-      // Use Microlink screenshot API (it generates high-res screenshot PNG)
-      // We request 1600x1200 screenshot
-      const apiUrl = `https://api.microlink.io?url=${encodeURIComponent(targetUrl)}&screenshot=true&embed=screenshot.url&viewport.width=1600&viewport.height=1200`;
+      // Build screenshot URL
+      // viewport parameters: width=1600, height=1200
+      let apiUrl = `https://api.microlink.io?url=${encodeURIComponent(browserUrl)}&screenshot=true&embed=screenshot.url&viewport.width=1600&viewport.height=1200`;
+      
+      if (captureMode === 'full') {
+        apiUrl += '&screenshot.fullPage=true';
+      } else {
+        // Scroll to the exact position captured from the iframe
+        apiUrl += `&screenshot.scrollTo=${Math.round(iframeScrollTop)}`;
+      }
       
       const response = await fetch(apiUrl);
       if (!response.ok) {
@@ -47,18 +140,196 @@ export function DropZone({ onFilesLoaded }: DropZoneProps) {
       const blob = await response.blob();
       const localUrl = URL.createObjectURL(blob);
       
-      const docName = targetUrl.replace(/^https?:\/\/(www\.)?/, '') + '.png';
+      const docName = browserUrl.replace(/^https?:\/\/(www\.)?/, '') + (captureMode === 'full' ? '_full' : '_viewport') + '.png';
       openDocument(docName, localUrl, 1, 'image');
       
-      setShowUrlModal(false);
-      setUrl('');
+      setIsBrowsing(false);
+      setIframeSrcDoc('');
     } catch (err: any) {
       console.error(err);
-      setErrorMsg('Die Webseite konnte nicht geladen werden. Bitte überprüfe die URL und versuche es erneut.');
+      setCaptureError('Die Seite konnte nicht konvertiert werden. Bitte versuche es erneut.');
     } finally {
-      setLoading(false);
+      setCaptureLoading(false);
     }
   };
+
+  if (isBrowsing) {
+    return (
+      <div style={{
+        display: 'flex',
+        flexDirection: 'column',
+        width: '100%',
+        height: 'calc(100vh - 185px)',
+        background: '#1a1a1a',
+        color: '#fff',
+        borderRadius: '8px',
+        overflow: 'hidden',
+        border: '1px solid var(--border)'
+      }}>
+        {/* Browser Top Bar */}
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 12,
+          padding: '12px 16px',
+          background: 'var(--bg-panel)',
+          borderBottom: '1px solid var(--border)',
+          flexWrap: 'wrap'
+        }}>
+          <button
+            onClick={() => {
+              setIsBrowsing(false);
+              setIframeSrcDoc('');
+            }}
+            className="btn-secondary"
+            style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 16px' }}
+          >
+            ← Zurück
+          </button>
+          
+          <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 8, minWidth: '240px' }}>
+            <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>Adresse:</span>
+            <input
+              type="text"
+              value={browserInputUrl}
+              onChange={(e) => setBrowserInputUrl(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  let u = browserInputUrl.trim();
+                  if (u) {
+                    if (!/^https?:\/\//i.test(u)) u = 'https://' + u;
+                    setBrowserUrl(u);
+                    setBrowserInputUrl(u);
+                    loadBrowserPage(u);
+                  }
+                }
+              }}
+              style={{
+                flex: 1,
+                padding: '6px 12px',
+                borderRadius: '6px',
+                background: '#111',
+                border: '1px solid var(--border)',
+                color: '#fff',
+                outline: 'none',
+                fontSize: '13px'
+              }}
+            />
+            <button
+              onClick={() => {
+                let u = browserInputUrl.trim();
+                if (u) {
+                  if (!/^https?:\/\//i.test(u)) u = 'https://' + u;
+                  setBrowserUrl(u);
+                  setBrowserInputUrl(u);
+                  loadBrowserPage(u);
+                }
+              }}
+              className="btn-primary"
+              style={{ padding: '6px 12px', background: 'var(--accent)' }}
+            >
+              Öffnen
+            </button>
+          </div>
+          
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <select
+              value={captureMode}
+              onChange={(e: any) => setCaptureMode(e.target.value)}
+              style={{
+                padding: '6px 12px',
+                borderRadius: '6px',
+                background: '#111',
+                border: '1px solid var(--border)',
+                color: '#fff',
+                fontSize: '13px',
+                outline: 'none'
+              }}
+            >
+              <option value="viewport">Aktuelle Ansicht</option>
+              <option value="full">Ganze Seite</option>
+            </select>
+            
+            <button
+              onClick={handleCaptureCurrentPage}
+              disabled={captureLoading}
+              className="btn-primary"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                padding: '8px 20px',
+                background: '#0e9f6e',
+                fontWeight: 'bold'
+              }}
+            >
+              {captureLoading ? 'Konvertiere...' : 'In PDF/Bild umwandeln'}
+            </button>
+          </div>
+        </div>
+
+        {/* Browser Iframe Content Area */}
+        <div style={{ flex: 1, position: 'relative', background: '#fff' }}>
+          {browserUrl ? (
+            <iframe
+              src={iframeSrcDoc ? undefined : browserUrl}
+              srcDoc={iframeSrcDoc || undefined}
+              style={{
+                width: '100%',
+                height: '100%',
+                border: 'none',
+                background: '#fff'
+              }}
+            />
+          ) : (
+            <div style={{
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              height: '100%',
+              color: 'var(--text-secondary)',
+              gap: 8
+            }}>
+              <span>Gib oben eine Web-Adresse ein und drücke Enter oder Öffnen.</span>
+            </div>
+          )}
+          
+          {captureLoading && (
+            <div style={{
+              position: 'absolute',
+              inset: 0,
+              background: 'rgba(0,0,0,0.7)',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 16,
+              zIndex: 1000
+            }}>
+              <div style={{
+                width: '40px',
+                height: '40px',
+                border: '4px solid rgba(255,255,255,0.1)',
+                borderTopColor: '#0e9f6e',
+                borderRadius: '50%',
+                animation: 'spin 1s linear infinite'
+              }} />
+              <span style={{ fontSize: '14px', color: '#fff', fontWeight: 'bold' }}>
+                Wandle Webseite um... Bitte warten...
+              </span>
+            </div>
+          )}
+        </div>
+        
+        {captureError && (
+          <div style={{ background: '#f87171', color: '#fff', padding: '8px 16px', fontSize: '13px', textAlign: 'center' }}>
+            {captureError}
+          </div>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div
@@ -108,56 +379,31 @@ export function DropZone({ onFilesLoaded }: DropZoneProps) {
       />
 
       {showUrlModal && (
-        <div className="modal-backdrop" onClick={() => !loading && setShowUrlModal(false)}>
+        <div className="modal-backdrop" onClick={() => setShowUrlModal(false)}>
           <div className="modal" onClick={(e) => e.stopPropagation()} style={{ minWidth: '400px' }}>
-            <h3>Internetseite öffnen und bearbeiten</h3>
-            {loading ? (
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16, padding: '20px 0' }}>
-                <div style={{
-                  width: '36px',
-                  height: '36px',
-                  border: '3px solid rgba(255,255,255,0.1)',
-                  borderTopColor: 'var(--accent)',
-                  borderRadius: '50%',
-                  animation: 'spin 1s linear infinite'
-                }} />
-                <span style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>Erstelle Screenshot der Webseite...</span>
-                <style>{`
-                  @keyframes spin {
-                    0% { transform: rotate(0deg); }
-                    100% { transform: rotate(360deg); }
-                  }
-                `}</style>
+            <h3>Internetseite öffnen und navigieren</h3>
+            <form onSubmit={handleStartBrowsing} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <label style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>Web-Adresse (URL):</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="https://example.com"
+                  value={url}
+                  onChange={(e) => setUrl(e.target.value)}
+                  className="modal-input"
+                  autoFocus
+                />
               </div>
-            ) : (
-              <form onSubmit={handleLoadUrl} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  <label style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>Web-Adresse (URL):</label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="https://example.com"
-                    value={url}
-                    onChange={(e) => setUrl(e.target.value)}
-                    className="modal-input"
-                    autoFocus
-                  />
-                </div>
-                {errorMsg && (
-                  <div style={{ color: '#f87171', fontSize: '12px', background: 'rgba(248,113,113,0.1)', padding: '8px 12px', borderRadius: '6px' }}>
-                    {errorMsg}
-                  </div>
-                )}
-                <div className="modal-actions">
-                  <button type="button" className="btn-secondary" onClick={() => setShowUrlModal(false)}>
-                    Abbrechen
-                  </button>
-                  <button type="submit" className="btn-primary" style={{ background: '#0e9f6e' }}>
-                    Laden & Konvertieren
-                  </button>
-                </div>
-              </form>
-            )}
+              <div className="modal-actions">
+                <button type="button" className="btn-secondary" onClick={() => setShowUrlModal(false)}>
+                  Abbrechen
+                </button>
+                <button type="submit" className="btn-primary" style={{ background: '#0e9f6e' }}>
+                  Öffnen & Vorschau
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
