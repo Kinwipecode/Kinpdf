@@ -32,6 +32,36 @@ export function AppShell() {
     }
   }, [openDocument]);
 
+  useEffect(() => {
+    const handlePaste = (e: ClipboardEvent) => {
+      if (document.activeElement instanceof HTMLTextAreaElement || document.activeElement instanceof HTMLInputElement) {
+        return;
+      }
+      
+      const items = e.clipboardData?.items;
+      if (!items) return;
+      
+      const imageFiles: File[] = [];
+      for (let i = 0; i < items.length; i++) {
+        if (items[i].type.indexOf('image') !== -1) {
+          const file = items[i].getAsFile();
+          if (file) {
+            const dateStr = new Date().toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit', second: '2-digit' }).replace(/:/g, '-');
+            const namedFile = new File([file], `Zwischenablage_${dateStr}.png`, { type: file.type });
+            imageFiles.push(namedFile);
+          }
+        }
+      }
+      
+      if (imageFiles.length > 0) {
+        handleFiles(imageFiles);
+      }
+    };
+
+    window.addEventListener('paste', handlePaste);
+    return () => window.removeEventListener('paste', handlePaste);
+  }, [handleFiles]);
+
 
   const openFileDialog = () => fileInputRef.current?.click();
 
