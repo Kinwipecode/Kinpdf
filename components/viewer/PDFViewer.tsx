@@ -88,7 +88,12 @@ function PDFPage({
         page.cleanup();
       } else if (fileType === 'image' && fileUrl) {
         const img = new Image();
-        img.crossOrigin = 'anonymous';
+        const isBlobOrDataUrl = fileUrl.startsWith('blob:') || fileUrl.startsWith('data:');
+        const isSameOrigin = typeof window !== 'undefined' && 
+          (fileUrl.startsWith(window.location.origin) || fileUrl.startsWith('/') || !fileUrl.includes('://'));
+        if (!isBlobOrDataUrl && !isSameOrigin) {
+          img.crossOrigin = 'anonymous';
+        }
         img.src = fileUrl;
         try {
           await img.decode();
